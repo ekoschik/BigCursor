@@ -1,151 +1,36 @@
 
 #include "stdafx.h"
-#include "BigCursor.h"
-#include <cmath>
+#include "CursorsTest.h"
 using namespace std;
 
 HINSTANCE ghinst;
 HWND ghwnd;
+int dpi = 96;
+
 std::list<OPTION_BOX*> optionsList;
-
-const SIZE szStart = { 1000, 800 };
-const POINT ptStart = { 50, 50 };
-
 OPTION_BOX* HoverOption = nullptr;
 OPTION_BOX* SelectedOption = nullptr;
 
-int dpi = 96;
-HFONT hfont = nullptr;
-HFONT hfontBold = nullptr;
-#define SCALE_FOR_DPI(val) MulDiv(val, dpi, 96)
-
-const int cxButton = 120;
-const int cyButton = 30;
-const int buf = 5;
-const int txtSize = 15;
-RECT rcTxtSystem = {};
-RECT rcTxtCustom = {};
-
-int base = 0;
-bool waiting = false;
-bool inDrag = false;
-POINT ptDragStart = {};
-POINT ptDrag = {};
-const int wheelDragSpeed = 15;
-
-COLORREF rgbButtonSystem = RGB(66, 170, 244);
-COLORREF rgbButtonCustom = RGB(232, 65, 244);
-COLORREF rgbButtonSelect = RGB(65, 244, 112);
-COLORREF rgbButtonHover = RGB(65, 205, 244);
-HBRUSH hbrButtonSystem;
-HBRUSH hbrButtonCustom;
-HBRUSH hbrButtonSelect;
-HBRUSH hbrButtonHover;
-
-void SetLayoutRects()
-{
-    const int cxSystem = SCALE_FOR_DPI(cxButton);
-    const int cxCustom = 2 * cxSystem + buf;
-    const int cy = SCALE_FOR_DPI(cyButton);
-
-    // set 'system:' text pos in top right (+buf, +base)
-    RECT rc = { buf, buf + base, buf + cxSystem, buf + cy + base };
-    rcTxtSystem = rc;
-
-    // move down
-    rc.top = rc.bottom + buf;
-    rc.bottom = rc.top + cy;
-
-    OPTION_BOX* option = optionsList.front();
-    while (option != nullptr && option->system)
-    {
-        CopyRect(&option->rcPos, &rc);
-
-        option = option->ptrNext;
-        if (option != nullptr)
-        {
-            // move right
-            rc.left = rc.right + buf;
-            rc.right = rc.left + cxSystem;
-
-            CopyRect(&option->rcPos, &rc);
-        }
-
-        // reset to right edge and move down
-        rc.left = buf;
-        rc.right = rc.left + cxSystem;
-        rc.top = rc.bottom + buf;
-        rc.bottom = rc.top + cy;
-
-        option = option->ptrNext;
-    }
-
-    // set 'custom' text pos
-    rcTxtCustom = rc;
-
-    rc.right = rc.left + cxCustom;
-    while (option != nullptr && option != optionsList.front())
-    {
-        rc.top = rc.bottom + buf;
-        rc.bottom = rc.top + cy;
-        CopyRect(&option->rcPos, &rc);
-        option = option->ptrNext;
-    }
-
-    InvalidateRect(ghwnd, nullptr, true);
-}
-
-void Draw(HDC hdc)
-{
-    SetBkMode(hdc, TRANSPARENT);
-
-    // Draw the heading text
-    SelectFont(hdc, hfontBold);
-    static wstring strSystem = L"system:";
-    static wstring strCustom = L"custom:";
-    DrawText(hdc, strSystem.c_str(), strSystem.length(), &rcTxtSystem, DT_VCENTER | DT_SINGLELINE);
-    DrawText(hdc, strCustom.c_str(), strCustom.length(), &rcTxtCustom, DT_VCENTER | DT_SINGLELINE);
-
-    // Draw each button
-    for (auto it = optionsList.begin(); it != optionsList.end(); ++it)
-    {
-        OPTION_BOX* option = *it;
-
-        SelectObject(hdc, 
-            ((option == SelectedOption) ? hbrButtonSelect :
-             ((option == HoverOption) ? hbrButtonHover :
-             (option->system ? hbrButtonSystem : hbrButtonCustom))));
-        
-        Rectangle(hdc,
-            option->rcPos.left,
-            option->rcPos.top,
-            option->rcPos.right,
-            option->rcPos.bottom);
-
-        SelectFont(hdc, hfont);
-        DrawText(hdc, option->name.c_str(), option->name.length(),
-            &option->rcPos, DT_CENTER | DT_VCENTER | DT_SINGLELINE);
-    }
-
-    // TODO: to the right of the buttons, maybe print current cursor name,
-    // and even all the info I can read out from it (GetCursorInfo...)
-
-}
+const SIZE szStart = { 1000, 800 };
+const int cxdrag = 5; //escape distance to disambiguate drags and clicks
+const int wheelDragSpeed = 15; // pixels to scroll per wheel increment
 
 void SetCurrentCursor()
 {
-    if (SelectedOption == nullptr)
+    if (SelectedOption != nullptr)
     {
-        FATEL_ERROR(L"Why is SelectedOption null?");
-        return;
+        SetCursor((HoverOption != nullptr) ?
+            HoverOption->hcur : SelectedOption->hcur);
     }
-
-    SetCursor((HoverOption != nullptr) ?
-        HoverOption->hcur : SelectedOption->hcur);
 }
 
 bool TestMouseMessageForDrag(POINT pt, UINT message)
 {
+    static bool waiting = false;
+    static bool inDrag = false;
+    static POINT ptDragStart = {};
+    static POINT ptDrag = {};
+
     if (message == WM_LBUTTONDBLCLK)
     {
         base = 0;
@@ -161,21 +46,21 @@ bool TestMouseMessageForDrag(POINT pt, UINT message)
         return true;
     }
 
-    if (waiting && message == WM_MOUSEMOVE)
+    if (message == WM_MOUSEMOVE)
     {
-        if (abs(pt.y - ptDragStart.y) > 5) // don't drag on a click
+        if (waiting && (abs(pt.y - ptDragStart.y) > SCALE_FOR_DPI(cxdrag)))
         {
             inDrag = true;
         }
-    }
 
-    if (inDrag && message == WM_MOUSEMOVE)
-    {
-        base += pt.y - ptDrag.y;
-        ptDrag = pt;
-        SetLayoutRects();
-        InvalidateRect(ghwnd, nullptr, true);
-        return true;
+        if (inDrag)
+        {
+            base += pt.y - ptDrag.y;
+            ptDrag = pt;
+            SetLayoutRects();
+            InvalidateRect(ghwnd, nullptr, true);
+            return true;
+        }
     }
 
     if (message == WM_LBUTTONUP)
@@ -192,15 +77,8 @@ bool TestMouseMessageForDrag(POINT pt, UINT message)
     return false;
 }
 
-void HandleMoveClick(int x, int y, UINT message)
+void HitTestMouseMessage(POINT pt, UINT message)
 {
-    POINT pt = { x, y };
-
-    if (TestMouseMessageForDrag(pt, message))
-    {
-        return;
-    }
-
     for (auto it = optionsList.begin(); it != optionsList.end(); ++it)
     {
         OPTION_BOX* option = *it;
@@ -235,17 +113,24 @@ void HandleMoveClick(int x, int y, UINT message)
     }
 }
 
+void HandleMoveClick(int x, int y, UINT message)
+{
+    POINT pt = { x, y };
+    if (!TestMouseMessageForDrag(pt, message))
+    {
+        HitTestMouseMessage(pt, message);
+    }
+}
+
 void HandleMouseWheel(bool down, bool ctrl)
 {
     if (ctrl)
     {
-        base += (down ? -1 : 1) * wheelDragSpeed;
+        base += (down ? -1 : 1) * SCALE_FOR_DPI(wheelDragSpeed);
         SetLayoutRects();
         InvalidateRect(ghwnd, nullptr, true);
-        return;
     }
-
-    if (SelectedOption != nullptr)
+    else if (SelectedOption != nullptr)
     {
         SelectedOption = (down ? 
             SelectedOption ->ptrNext: SelectedOption->ptrPrev);
@@ -264,21 +149,7 @@ void UpdateWindowDpi(int _dpi)
     swprintf(buf, 100, L"Window DPI: %i", dpi);
     SetWindowText(ghwnd, (LPCWSTR)&buf);
 
-    if (hfont != nullptr)
-    {
-        DeleteFont(hfont);
-    }
-
-    if (hfontBold != nullptr)
-    {
-        DeleteFont(hfont);
-    }
-
-    hfont = CreateFont(SCALE_FOR_DPI(txtSize),
-        0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, L"Consolas");
-
-    hfontBold = CreateFont(1.5 * SCALE_FOR_DPI(txtSize),
-        0, 0, 0, FW_BOLD, 0, 0, 0, 0, 0, 0, 0, 0, L"Consolas");
+    UpdateFonts();
 }
 
 void HandleDpiChanged(int _dpi, PRECT prc)
@@ -311,11 +182,6 @@ void InitWindow()
     SelectedOption = optionsList.front();
 
     SetLayoutRects();
-
-    hbrButtonSystem = CreateSolidBrush(rgbButtonSystem);
-    hbrButtonCustom = CreateSolidBrush(rgbButtonCustom);
-    hbrButtonSelect = CreateSolidBrush(rgbButtonSelect);
-    hbrButtonHover = CreateSolidBrush(rgbButtonHover);
 }
 
 LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
@@ -352,7 +218,7 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
         delta += GET_WHEEL_DELTA_WPARAM(wParam);
         if (delta >= 120 || delta <= -120)
         {
-            HandleMouseWheel(delta < 0, LOWORD(wParam) & MK_CONTROL);
+            HandleMouseWheel(delta < 0, !!(LOWORD(wParam) & MK_CONTROL));
             delta = 0;
             return 1;
         }
@@ -365,8 +231,10 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
         static WINDOWPOS wp = {};
         if ((pwp->cx != wp.cx) || (pwp->cy != wp.cy))
         {
-            SetLayoutRects();
             RtlCopyMemory(&wp, pwp, sizeof(WINDOWPOS));
+
+            // Don't re-layout unless the size changed
+            SetLayoutRects();
         }
         break;
     }
@@ -395,20 +263,13 @@ LRESULT CALLBACK WndProc(HWND hwnd, UINT message, WPARAM wParam, LPARAM lParam)
     return DefWindowProc(hwnd, message, wParam, lParam);
 }
 
-int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
-                      _In_opt_ HINSTANCE hPrevInstance,
-                      _In_ LPWSTR    lpCmdLine,
-                      _In_ int       nCmdShow)
+HWND CreateMainWindow()
 {
-    ghinst = hInstance;
     LPCWSTR szWndClass = L"class";
     LPCWSTR szWndTitle = L"Cursors Test App";
 
-    InitCursors();
-
     WNDCLASSEXW wcex = {};
     wcex.cbSize = sizeof(WNDCLASSEX);
-
     wcex.style = CS_HREDRAW | CS_VREDRAW | CS_DBLCLKS;
     wcex.lpfnWndProc = WndProc;
     wcex.cbClsExtra = 0;
@@ -422,15 +283,23 @@ int APIENTRY wWinMain(_In_ HINSTANCE hInstance,
 
     if (!RegisterClassEx(&wcex))
     {
-        return 1;
+        return nullptr;
     }
 
-    HWND hwnd = CreateWindow(
-        szWndClass, szWndTitle, WS_OVERLAPPEDWINDOW,
+    return CreateWindow(
+        szWndClass, szWndTitle,
+        WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT, CW_USEDEFAULT,
         nullptr, nullptr, ghinst, nullptr);
+}
 
-    if (hwnd == nullptr)
+int APIENTRY wWinMain(_In_ HINSTANCE hInstance, HINSTANCE, LPWSTR, int)
+{
+    ghinst = hInstance;
+
+    InitCursors();
+
+    if (CreateMainWindow() == nullptr)
     {
         return 1;
     }

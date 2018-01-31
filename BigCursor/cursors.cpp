@@ -1,6 +1,6 @@
 
 #include "stdafx.h"
-#include "BigCursor.h"
+#include "CursorsTest.h"
 using namespace std;
 
 extern BYTE XORmaskCursor[128];

@@ -4,6 +4,7 @@
 #include "windowsx.h"
 #include <string>
 #include <list>
+#include <cmath>
 
 extern HINSTANCE ghinst;
 extern HWND ghwnd;
@@ -11,6 +12,14 @@ extern HWND ghwnd;
 #define FATEL_ERROR(msg) \
     MessageBox(ghwnd, msg, L"ERROR", MB_OK); \
     PostQuitMessage(1);
+
+extern int dpi;
+#define SCALE_FOR_DPI(val) MulDiv(val, dpi, 96)
+
+void SetLayoutRects();
+void Draw(HDC hdc);
+void UpdateFonts();
+extern int base;
 
 class OPTION_BOX
 {
@@ -29,6 +38,9 @@ public:
 
 extern std::list<OPTION_BOX*> optionsList;
 void InitCursors();
+
+extern OPTION_BOX* HoverOption;
+extern OPTION_BOX* SelectedOption;
 
 __inline UINT GetDpiForWindow(HWND hwnd)
 {
